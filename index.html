@@ -276,6 +276,14 @@
         headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({ messages: conversation })
       });
+      if(!res.ok){
+        const errBody = await res.text();
+        errEl.textContent = 'Chat error (' + res.status + '): ' + errBody.slice(0,200);
+        addLine('JARVIS', "I'm having trouble reaching my systems right now.");
+        setState('');
+        hintEl.textContent = 'Tap the core to speak';
+        return;
+      }
       const data = await res.json();
       const latency = Math.round(performance.now() - t0);
       latEl.textContent = latency;
@@ -286,7 +294,7 @@
       addLine('JARVIS', reply);
       await speak(reply);
     }catch(e){
-      errEl.textContent = 'Connection issue — check your network settings.';
+      errEl.textContent = 'Connection issue: ' + e.message;
       addLine('JARVIS', "I'm having trouble reaching my systems right now.");
     }
     setState('');

@@ -357,9 +357,30 @@
 
   recognition = initRecognition();
 
-  orbWrap.addEventListener('click', () => {
+  let greeted = false;
+  function timeGreeting(){
+    const h = new Date().getHours();
+    if(h < 12) return 'Good morning, sir. Systems are online and ready.';
+    if(h < 18) return 'Good afternoon, sir. All systems nominal.';
+    return 'Good evening, sir. Standing by whenever you need me.';
+  }
+
+  orbWrap.addEventListener('click', async () => {
     if(!recognition) return;
+
+    if(!greeted){
+      greeted = true;
+      const greeting = timeGreeting();
+      addLine('JARVIS', greeting);
+      await speak(greeting);
+      setState('');
+      hintEl.textContent = 'Tap the core to speak';
+      return;
+    }
+
+    if(currentAudio && !currentAudio.paused){ currentAudio.pause(); }
     if(speechSynthesis.speaking){ speechSynthesis.cancel(); }
+
     if(recognizing){
       recognition.stop();
       return;
@@ -369,25 +390,6 @@
       recognition.start();
     }catch(e){
       setTimeout(() => { try{ recognition.start(); }catch(_){} }, 250);
-    }
-  });
-
-  let greeted = false;
-  function timeGreeting(){
-    const h = new Date().getHours();
-    if(h < 12) return 'Good morning, sir. Systems are online and ready.';
-    if(h < 18) return 'Good afternoon, sir. All systems nominal.';
-    return 'Good evening, sir. Standing by whenever you need me.';
-  }
-  orbWrap.addEventListener('click', async (e) => {
-    if(!greeted){
-      greeted = true;
-      const greeting = timeGreeting();
-      addLine('JARVIS', greeting);
-      await speak(greeting);
-      setState('');
-      hintEl.textContent = 'Tap the core to speak';
-      return;
     }
   });
 

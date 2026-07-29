@@ -32,7 +32,6 @@
     height:100dvh;
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
-
   .grid-overlay{
     position:fixed; inset:0; pointer-events:none; z-index:1;
     background-image:
@@ -41,7 +40,6 @@
     background-size: 42px 42px;
     mask-image: radial-gradient(ellipse at 50% 40%, black 0%, transparent 75%);
   }
-
   header{
     position:relative; z-index:2;
     display:flex; justify-content:space-between; align-items:center;
@@ -54,7 +52,6 @@
   }
   .brand span{color:var(--ink-dim); font-weight:400;}
   .clock{font-size:11px; letter-spacing:2px; color:var(--ink-dim);}
-
   main{
     position:relative; z-index:2;
     flex:1;
@@ -62,7 +59,6 @@
     gap:22px;
     padding: 0 20px;
   }
-
   .orb-wrap{
     position:relative;
     width: min(64vw, 280px); height: min(64vw, 280px);
@@ -77,7 +73,6 @@
   .ring.r2{animation: spin 26s linear infinite reverse;}
   .ring.r3{animation: spin 40s linear infinite;}
   @keyframes spin{ to{ transform:rotate(360deg);} }
-
   .core{
     position:relative;
     width:38%; height:38%;
@@ -109,7 +104,6 @@
     from{ transform:scale(1); }
     to{ transform:scale(1.05); }
   }
-
   .status{
     font-family:'Orbitron', sans-serif;
     font-size: 12px;
@@ -123,13 +117,11 @@
   .hint{
     font-size:13px; color:var(--ink-dim); letter-spacing:1px; text-align:center;
   }
-
   .telemetry{
     display:flex; gap:18px; font-size:10px; letter-spacing:1.5px; color:var(--ink-dim);
     font-family:'Orbitron', sans-serif;
   }
   .telemetry b{ color: var(--arc-dim); }
-
   .log{
     position:relative; z-index:2;
     width:100%;
@@ -146,7 +138,6 @@
   .line.jarvis{ align-self:flex-start; color:var(--ink); }
   .line.jarvis .who{ color:var(--arc); }
   .who{ font-family:'Orbitron', sans-serif; font-size:10px; letter-spacing:2px; display:block; margin-bottom:2px; opacity:0.8;}
-
   footer{
     position:relative; z-index:2;
     padding: 10px 20px calc(16px + env(safe-area-inset-bottom));
@@ -159,7 +150,7 @@
   <div class="grid-overlay"></div>
 
   <header>
-    <div class="brand">J.A.R.V.I.S. <span>// v0.1</span></div>
+    <div class="brand">J.A.R.V.I.S. <span>// v0.2</span></div>
     <div class="clock" id="clock">--:--:--</div>
   </header>
 
@@ -207,10 +198,12 @@
   tickClock(); setInterval(tickClock, 1000);
 
   let conversation = [];
-  let recognition = null;
-  let recognizing = false;
   let voices = [];
   let chosenVoice = null;
+  let mediaRecorder = null;
+  let audioChunks = [];
+  let isRecording = false;
+  let currentAudio = null;
 
   function setState(state){
     orbWrap.classList.remove('listening','thinking','speaking');
@@ -259,7 +252,6 @@
     });
   }
 
-  let currentAudio = null;
   function speak(text){
     return new Promise(async (resolve) => {
       setState('speaking');
@@ -281,6 +273,15 @@
         await speakBrowserFallback(text);
         resolve();
       }
+    });
+  }
+
+  function blobToBase64(blob){
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
     });
   }
 
@@ -308,54 +309,68 @@
       addLine('JARVIS', "I'm having trouble reaching my systems right now.");
     }
     setState('');
+    hintEl.textContent = 'Tap the core to speak';
   }
 
-  function initRecognition(){
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if(!SR){
-      errEl.textContent = 'Voice input not supported in this browser.';
-      hintEl.textContent = 'Voice unavailable on this browser';
-      micStateEl.textContent = 'N/A';
-      return null;
+  async function transcribeAndAsk(blob){
+    setState('thinking');
+    hintEl.textContent = 'Transcribing…';
+    try{
+      const base64 = await blobToBase64(blob);
+      const res = await fetch('/.netlify/functions/transcribe', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ audioBase64: base64, mimeType: blob.type })
+      });
+      const data = await res.json();
+      const transcript = (data.text || '').trim();
+      if(!transcript){
+        errEl.textContent = 'No speech detected — tap and try again.';
+        setState('');
+        hintEl.textContent = 'Tap the core to speak';
+        return;
+      }
+      errEl.textContent = '';
+      addLine('You', transcript);
+      await askJarvis(transcript);
+    }catch(e){
+      errEl.textContent = 'Transcription failed — check your connection.';
+      setState('');
+      hintEl.textContent = 'Tap the core to speak';
     }
-    const r = new SR();
-    r.lang = '';
-    r.continuous = false;
-    r.interimResults = false;
-    r.maxAlternatives = 1;
+  }
 
-    r.onstart = () => {
-      recognizing = true;
+  async function startRecording(){
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunks = [];
+      const options = MediaRecorder.isTypeSupported('audio/webm') ? { mimeType: 'audio/webm' } : {};
+      mediaRecorder = new MediaRecorder(stream, options);
+      mediaRecorder.ondataavailable = (e) => { if(e.data.size > 0) audioChunks.push(e.data); };
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        micStateEl.textContent = 'READY';
+        const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+        await transcribeAndAsk(blob);
+      };
+      mediaRecorder.start();
+      isRecording = true;
       micStateEl.textContent = 'LIVE';
       setState('listening');
+      hintEl.textContent = 'Listening… tap to stop';
       errEl.textContent = '';
-    };
-    r.onend = () => {
-      recognizing = false;
-      micStateEl.textContent = 'READY';
-      if(orbWrap.classList.contains('listening')) setState('');
-    };
-    r.onerror = (e) => {
-      recognizing = false;
-      micStateEl.textContent = 'READY';
+    }catch(e){
+      errEl.textContent = 'Microphone access denied — check Safari settings for this site.';
       setState('');
-      if(e.error === 'not-allowed' || e.error === 'permission-denied'){
-        errEl.textContent = 'Microphone access denied — enable it in browser settings.';
-      } else if(e.error === 'no-speech'){
-        errEl.textContent = 'No speech detected — tap and try again.';
-      } else {
-        errEl.textContent = 'Mic error: ' + e.error;
-      }
-    };
-    r.onresult = (e) => {
-      const transcript = e.results[0][0].transcript;
-      addLine('You', transcript);
-      askJarvis(transcript);
-    };
-    return r;
+    }
   }
 
-  recognition = initRecognition();
+  function stopRecording(){
+    if(mediaRecorder && isRecording){
+      mediaRecorder.stop();
+      isRecording = false;
+    }
+  }
 
   let greeted = false;
   function timeGreeting(){
@@ -366,8 +381,6 @@
   }
 
   orbWrap.addEventListener('click', async () => {
-    if(!recognition) return;
-
     if(!greeted){
       greeted = true;
       const greeting = timeGreeting();
@@ -381,15 +394,10 @@
     if(currentAudio && !currentAudio.paused){ currentAudio.pause(); }
     if(speechSynthesis.speaking){ speechSynthesis.cancel(); }
 
-    if(recognizing){
-      recognition.stop();
-      return;
-    }
-    hintEl.textContent = 'Listening…';
-    try{
-      recognition.start();
-    }catch(e){
-      setTimeout(() => { try{ recognition.start(); }catch(_){} }, 250);
+    if(isRecording){
+      stopRecording();
+    } else {
+      await startRecording();
     }
   });
 

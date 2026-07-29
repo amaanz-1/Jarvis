@@ -253,31 +253,8 @@
   }
 
   function speak(text){
-    return new Promise(async (resolve) => {
-      setState('speaking');
-      try{
-        const res = await fetch('/.netlify/functions/speak', {
-          method:'POST',
-          headers:{ 'Content-Type':'application/json' },
-          body: JSON.stringify({ text })
-        });
-        if(!res.ok){
-          const errBody = await res.text();
-          errEl.textContent = 'Voice error (' + res.status + '): ' + errBody.slice(0,200);
-          throw new Error('tts failed');
-        }
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        if(currentAudio){ currentAudio.pause(); }
-        currentAudio = new Audio(url);
-        currentAudio.onended = () => { URL.revokeObjectURL(url); resolve(); };
-        currentAudio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
-        await currentAudio.play();
-      }catch(e){
-        await speakBrowserFallback(text);
-        resolve();
-      }
-    });
+    setState('speaking');
+    return speakBrowserFallback(text);
   }
 
   function blobToBase64(blob){

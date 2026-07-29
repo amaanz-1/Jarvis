@@ -261,7 +261,11 @@
           headers:{ 'Content-Type':'application/json' },
           body: JSON.stringify({ text })
         });
-        if(!res.ok) throw new Error('tts failed');
+        if(!res.ok){
+          const errBody = await res.text();
+          errEl.textContent = 'Voice error (' + res.status + '): ' + errBody.slice(0,200);
+          throw new Error('tts failed');
+        }
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         if(currentAudio){ currentAudio.pause(); }
@@ -322,6 +326,13 @@
         headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({ audioBase64: base64, mimeType: blob.type })
       });
+      if(!res.ok){
+        const errBody = await res.text();
+        errEl.textContent = 'Transcribe error (' + res.status + '): ' + errBody.slice(0,200);
+        setState('');
+        hintEl.textContent = 'Tap the core to speak';
+        return;
+      }
       const data = await res.json();
       const transcript = (data.text || '').trim();
       if(!transcript){
@@ -334,7 +345,7 @@
       addLine('You', transcript);
       await askJarvis(transcript);
     }catch(e){
-      errEl.textContent = 'Transcription failed — check your connection.';
+      errEl.textContent = 'Transcription failed: ' + e.message;
       setState('');
       hintEl.textContent = 'Tap the core to speak';
     }
